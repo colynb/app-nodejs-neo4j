@@ -1,7 +1,10 @@
-import { goodfellas } from '../../test/fixtures/movies.js'
-import { ratings } from '../../test/fixtures/ratings.js'
-import NotFoundError from '../errors/not-found.error.js'
-import { toNativeTypes } from '../utils.js'
+import { goodfellas } from "../../test/fixtures/movies.js";
+import { ratings } from "../../test/fixtures/ratings.js";
+import NotFoundError from "../errors/not-found.error.js";
+import { toNativeTypes } from "../utils.js";
+import { int } from "neo4j-driver";
+
+// ...
 
 // TODO: Import the `int` function from neo4j-driver
 
@@ -9,16 +12,16 @@ export default class ReviewService {
   /**
    * @type {neo4j.Driver}
    */
-  driver
+  driver;
 
   /**
-  * The constructor expects an instance of the Neo4j Driver, which will be
-  * used to interact with Neo4j.
-  *
-  * @param {neo4j.Driver} driver
-  */
+   * The constructor expects an instance of the Neo4j Driver, which will be
+   * used to interact with Neo4j.
+   *
+   * @param {neo4j.Driver} driver
+   */
   constructor(driver) {
-    this.driver = driver
+    this.driver = driver;
   }
 
   /**
@@ -38,10 +41,10 @@ export default class ReviewService {
    * @returns {Promise<Record<string, any>>}
    */
   // tag::forMovie[]
-  async forMovie(id, sort = 'timestamp', order = 'ASC', limit = 6, skip = 0) {
+  async forMovie(id, sort = "timestamp", order = "ASC", limit = 6, skip = 0) {
     // TODO: Get ratings for a Movie
 
-    return ratings
+    return ratings;
   }
   // end::forMovie[]
 
@@ -59,12 +62,42 @@ export default class ReviewService {
    */
   // tag::add[]
   async add(userId, movieId, rating) {
-    // TODO: Convert the native integer into a Neo4j Integer
-    // TODO: Save the rating in the database
-    // TODO: Return movie details and a rating
+    // Convert the native integer into a Neo4j Integer
+    rating = int(rating);
+    const session = this.driver.session();
 
-    return goodfellas
+    // Save the rating in the database
+    const res = await session.executeWrite((tx) =>
+      tx.run(
+        `
+      MATCH (u:User {userId: $userId})
+      MATCH (m:Movie {tmdbId: $movieId})
+
+      MERGE (u)-[r:RATED]->(m)
+      SET r.rating = $rating,
+          r.timestamp = timestamp()
+
+      RETURN m {
+        .*,
+        rating: r.rating
+      } AS movie
+    `,
+        { userId, movieId, rating }
+      )
+    );
+
+    await session.close();
+
+    // Check User and Movie exist
+    if (res.records.length === 0) {
+      throw new NotFoundError(
+        `Could not create rating for Movie ${movieId} by User ${userId}`
+      );
+    }
+    const [first] = res.records;
+    const movie = first.get("movie");
+
+    return toNativeTypes(movie);
   }
   // end::add[]
-
 }
